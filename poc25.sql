@@ -12,14 +12,16 @@ use POC25;
 go
 create table dbo.Offence (
     OffenceID int primary key
-    , Descr varchar(100) not null
+    , Summary varchar(100) not null
+    , Description varchar(1000) not null
     , OffenceDate datetime not null
 );
 go
-insert into dbo.Offence(OffenceID, Descr, OffenceDate) values
-(1, 'Terrorism attack', '2023-01-15'),
-(2, 'Money Laundering incident', '2025-02-20'),
-(3, 'Child Abuse case', '2026-02-05');
+insert into dbo.Offence(OffenceID, Summary, Description, OffenceDate) values
+    (1, 'Terrorism attack', 'Suspects drove away very fast more than 200 km/h', '2023-01-15')
+    , (2, 'Money Laundering incident', 'Suspects drove away slowly', '2025-02-20')
+    , (3, 'Child Abuse case', 'Suspects walked away','2026-02-05')
+;
 GO
 create table dbo.Person(
     PersonID int primary key
@@ -29,91 +31,119 @@ create table dbo.Person(
 );
 GO
 insert into dbo.Person(PersonID, Firstname, Lastname, DoB) VALUES
-(1, 'Jack', 'Johnson', '2000-01-01'),
-(2, 'Jane', 'Doe', '2002-11-21'),
-(3, 'Bad', 'Guy', '2001-09-11');
+    (1, 'Jack', 'Johnson', '2000-01-01')
+    , (2, 'Jane', 'Doe', '2002-11-21')
+    , (3, 'Bad', 'Guy', '2001-09-11')
+    , (4, 'Good', 'Guy', '1970-01-01')
+;
 GO
-create table dbo.Involved(
-    PersonID int not null
-    , OffenceID int not null
-    , Involvement varchar(50)
-    , InvolvedDate datetime
-    , primary key (PersonID, OffenceID)
+
+create table dbo.Car(
+    CarID int primary key
+    , LicensePlate varchar(100) not null
+    , ImageURL varchar(500) null
+    , ImageBlob varbinary(MAX) null
+    , PersonID int null
     , foreign key (PersonID) references dbo.Person(PersonID)
-    , foreign key (OffenceID) references dbo.Offence(OffenceID)
 );
 GO
-insert into dbo.Involved(PersonID, OffenceID, Involvement, InvolvedDate) values
-(1, 1, 'Suspect', '2023-01-15'),
-(2, 2, 'Witness', '2025-02-20'),
-(3, 1, 'Perpetrator', '2023-01-15'),
-(3, 3, 'Victim', '2026-02-05');
+ 
+insert into dbo.Car(CarID, LicensePlate, ImageURL, ImageBlob, PersonID) values
+    (1, '3-ZBZ-54', NULL, NULL, 1)    -- Maserati GranCabrio
+    , (2, 'XF-FG-78', NULL, NULL, 2)  -- Porsche 911 Turbo
+    , (3, 'SX-610-X', NULL, NULL, 3)  -- Mini Cooper One
+    , (4, 'RO-12-345', NULL, NULL, 4)  -- Dacia Logan
+;
 GO
-create view dbo.vOffence AS 
-select o.Descr, Person = p.Firstname+' '+ p.Lastname, DoB= cast(p.DoB as Date), i.Involvement, OffenceDate = cast(o.offenceDate as date   )
+
+create view vPersonCar AS
+select p.PersonID, FirstName, LastName, LicensePlate 
 from Person p
-join Involved i on p.PersonID = i.PersonID
-join Offence o on i.OffenceID = o.OffenceID;
+join Car c on p.PersonID = c.PersonID;
 GO
-select * from dbo.vOffence;
-GO
-create table dbo.MoT(
-    MoTID int primary key
-    , MoTType varchar(50) not null
-    , MoTRegistration varchar(50) 
-);
+select * from dbo.vPersonCar
 GO
 
-insert into dbo.MoT(MoTID, MoTType, MoTRegistration) values
-(1, 'Maserati Gran Cabrio', 'AB-123-C'),
-(2, 'Porsche 911 Turbo', '12-EF-34'),
-(3, 'Mini Cooper One', 'GH-567-I');
-GO
-create table MOT_Owner(
-    MoTID int not null
-    , PersonID int not null
-    , OwnershipDate datetime not null
-    , primary key (MoTID, PersonID)
-    , foreign key (MoTID) references dbo.MoT(MoTID)
-    , foreign key (PersonID) references dbo.Person(PersonID)
-);
-insert into MOT_Owner(MoTID, PersonID, OwnershipDate) values
-(1, 1, '2022-05-01'),
-(2, 2, '2023-03-15'),
-(3, 3, '2024-07-20');
-GO
-create table dbo.MultiMedia(
-    MultiMediaID int primary key,
-    Descr varchar(100) not null,
-    MediaType varchar(50),
-    MediaPath varchar(255),
-    Blob varbinary(max) 
-);
+-- Note: OPENROWSET BULK requires 'Ad Hoc Distributed Queries' to be enabled
+-- This may not be available in all SQL Server editions (e.g., Azure SQL, Linux)
+-- Try to enable it, but handle the error if not supported
+
+BEGIN TRY
+    EXEC sp_configure 'show advanced options', 1;
+    RECONFIGURE;
+    EXEC sp_configure 'Ad Hoc Distributed Queries', 1;
+    RECONFIGURE;
+    PRINT 'Ad Hoc Distributed Queries enabled successfully';
+END TRY
+BEGIN CATCH
+    PRINT 'Warning: Ad Hoc Distributed Queries could not be enabled. This feature may not be available in your SQL Server edition.';
+    PRINT 'Alternative: Use the Python script (load_images.py) to load images instead.';
+END CATCH
 GO
 
-insert into dbo.MultiMedia(MultiMediaID, Descr, MediaType, MediaPath) values
-(1, 'Jack Johnson Photo', 'Photo', '/images/jack_johnson_1.jpg'),
-(2, 'Jack Johnson Interview', 'Video', '/videos/jack_johnson_interview.mp4'),
-(3, 'Jane Doe Photo', 'Photo', '/images/jane_doe_1.jpg'),
-(4, 'Bad Guy Statement', 'Audio', '/audio/bad_guy_statement.mp4');
+-- Stored procedure to load image from file
+CREATE PROCEDURE dbo.LoadImageFromFile
+    @CarID int,
+    @FilePath varchar(500)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    DECLARE @ImageData varbinary(MAX);
+    DECLARE @SQL nvarchar(MAX);
+    
+    BEGIN TRY
+        -- Build dynamic SQL to load file using OPENROWSET
+        SET @SQL = N'SELECT @ImageData = BulkColumn 
+                     FROM OPENROWSET(BULK ''' + @FilePath + ''', SINGLE_BLOB) AS ImageFile';
+        
+        -- Execute and get the binary data
+        EXEC sp_executesql @SQL, N'@ImageData varbinary(MAX) OUTPUT', @ImageData OUTPUT;
+        
+        -- Update the Car table
+        UPDATE dbo.Car
+        SET ImageBlob = @ImageData,
+            ImageURL = @FilePath
+        WHERE CarID = @CarID;
+        
+        IF @@ROWCOUNT > 0
+            PRINT 'Image successfully loaded for CarID ' + CAST(@CarID AS VARCHAR(10)) + 
+                  ' from ' + @FilePath + ' (' + CAST(DATALENGTH(@ImageData) AS VARCHAR(20)) + ' bytes)';
+        ELSE
+            RAISERROR('CarID %d not found', 16, 1, @CarID);
+            
+    END TRY
+    BEGIN CATCH
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR('Failed to load image: %s', 16, 1, @ErrorMessage);
+    END CATCH
+END
 GO
 
-create table MOT_MultiMedia(
-    MoTID int not null
-    , MultiMediaID int not null
-    , primary key (MoTID, MultiMediaID)
-    , foreign key (MoTID) references dbo.MoT(MoTID)
-    , foreign key (MultiMediaID) references dbo.MultiMedia(MultiMediaID)
-);
-insert into MOT_MultiMedia(MoTID, MultiMediaID) values
-(1, 1),
-(1, 2),
-(2, 3),
-(3, 4);
-select *
-from dbo.Person p
-join MOT_Owner mo on p.PersonID = mo.PersonID
-join dbo.MoT m on mo.MoTID = m.MoTID
-join dbo.MOT_MultiMedia ON m.MoTID = dbo.MOT_MultiMedia.MoTID
-join dbo.MultiMedia mm on dbo.MOT_MultiMedia.MultiMediaID = mm.MultiMediaID;
+EXEC dbo.LoadImageFromFile @CarID = 1, @FilePath = '/workspaces/Project25/Images/Car1.jpg';
+EXEC dbo.LoadImageFromFile @CarID = 2, @FilePath = '/workspaces/Project25/Images/Car2.jpg';
+EXEC dbo.LoadImageFromFile @CarID = 3, @FilePath = '/workspaces/Project25/Images/Car3.jpg';
+EXEC dbo.LoadImageFromFile @CarID = 4, @FilePath = '/workspaces/Project25/Images/Car4.jpg';
+
+GO
+
+-- Verify images were loaded
+SELECT CarID, LicensePlate, ImageURL, 
+       CASE WHEN ImageBlob IS NULL THEN 'No Image' 
+            ELSE 'Image Loaded (' + CAST(DATALENGTH(ImageBlob) AS VARCHAR(20)) + ' bytes)' 
+       END AS ImageStatus
+FROM dbo.Car
+ORDER BY CarID;
+GO
+
+-- Display actual images (will render in Azure Data Studio / SSMS)
+SELECT 
+    CarID,
+    LicensePlate,
+    ImageURL,
+    ImageBlob AS Image,
+    DATALENGTH(ImageBlob) AS ImageSizeBytes
+FROM dbo.Car
+WHERE ImageBlob IS NOT NULL
+ORDER BY CarID;
 GO
