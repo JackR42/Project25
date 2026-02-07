@@ -10,17 +10,25 @@ create database POC25;
 go
 use POC25;
 go
-create table dbo.Offence (
+
+-- Drop existing objects if they exist
+DROP VIEW IF EXISTS dbo.vPersonMoT;
+DROP TABLE IF EXISTS dbo.MeansOfTransportation;
+DROP TABLE IF EXISTS dbo.Person;
+DROP TABLE IF EXISTS dbo.CriminalOffence;
+GO
+
+create table dbo.CriminalOffence (
     OffenceID int primary key
     , Summary varchar(100) not null
-    , Description varchar(1000) not null
-    , OffenceDate datetime not null
+    , Descr varchar(500) null
+    , CreateDate datetime not null
 );
 go
-insert into dbo.Offence(OffenceID, Summary, Description, OffenceDate) values
-    (1, 'Terrorism attack', 'Suspects drove away very fast more than 200 km/h', '2023-01-15')
-    , (2, 'Money Laundering incident', 'Suspects drove away slowly', '2025-02-20')
-    , (3, 'Child Abuse case', 'Suspects walked away','2026-02-05')
+insert into dbo.CriminalOffence(OffenceID, Summary, Descr, CreateDate) values
+    (1, 'Terrorism attack', 'Suspects left the crime scene driving very fast, more than 200 km/h', '2023-01-15')
+    , (2, 'Money Laundering incident', 'Suspects driving around very slowly', '2025-02-20')
+    , (3, 'Child Abuse case', 'Suspects walked around exploring the area','2026-02-05')
 ;
 GO
 create table dbo.Person(
@@ -37,31 +45,32 @@ insert into dbo.Person(PersonID, Firstname, Lastname, DoB) VALUES
     , (4, 'Good', 'Guy', '1970-01-01')
 ;
 GO
-
-create table dbo.Car(
-    CarID int primary key
-    , LicensePlate varchar(100) not null
+create table dbo.MeansOfTransportation(
+    MotID int primary key
+    , VIN varchar(100) not null
+    , Descr varchar(500) null
     , ImageURL varchar(500) null
     , ImageBlob varbinary(MAX) null
+    , ImageEmbedding vector(1536) null
     , PersonID int null
     , foreign key (PersonID) references dbo.Person(PersonID)
 );
 GO
  
-insert into dbo.Car(CarID, LicensePlate, ImageURL, ImageBlob, PersonID) values
-    (1, '3-ZBZ-54', NULL, NULL, 1)    -- Maserati GranCabrio
-    , (2, 'XF-FG-78', NULL, NULL, 2)  -- Porsche 911 Turbo
-    , (3, 'SX-610-X', NULL, NULL, 3)  -- Mini Cooper One
-    , (4, 'RO-12-345', NULL, NULL, 4)  -- Dacia Logan
+insert into dbo.MeansOfTransportation(MotID, VIN, Descr, ImageURL, ImageBlob, PersonID) values
+    (1, '3-ZBZ-54', 'Car1', NULL, NULL, 1)    -- Maserati GranCabrio
+    , (2, 'XF-FG-78', 'Car2', NULL, NULL, 2)  -- Porsche 911 Turbo
+    , (3, 'SX-610-X', 'Car3', NULL, NULL, 3)  -- Mini Cooper One
+    , (4, 'RO-123-45', 'Car4', NULL, NULL, 4)  -- Dacia Logan
 ;
 GO
 
-create view vPersonCar AS
-select p.PersonID, FirstName, LastName, LicensePlate 
+create view vPersonMoT AS
+select p.PersonID, FirstName, LastName, VIN, Descr
 from Person p
-join Car c on p.PersonID = c.PersonID;
+join MeansOfTransportation mot on p.PersonID = mot.PersonID;
 GO
-select * from dbo.vPersonCar
+-- select * from dbo.vPersonMoT
 GO
 
 -- Note: OPENROWSET BULK requires 'Ad Hoc Distributed Queries' to be enabled
@@ -82,8 +91,10 @@ END CATCH
 GO
 
 -- Stored procedure to load image from file
+DROP PROCEDURE IF EXISTS dbo.LoadImageFromFile;
+GO
 CREATE PROCEDURE dbo.LoadImageFromFile
-    @CarID int,
+    @MotID int,
     @FilePath varchar(500)
 AS
 BEGIN
@@ -100,17 +111,17 @@ BEGIN
         -- Execute and get the binary data
         EXEC sp_executesql @SQL, N'@ImageData varbinary(MAX) OUTPUT', @ImageData OUTPUT;
         
-        -- Update the Car table
-        UPDATE dbo.Car
+        -- Update the MeansOfTransportation table
+        UPDATE dbo.MeansOfTransportation
         SET ImageBlob = @ImageData,
             ImageURL = @FilePath
-        WHERE CarID = @CarID;
+        WHERE MotID = @MotID;
         
         IF @@ROWCOUNT > 0
-            PRINT 'Image successfully loaded for CarID ' + CAST(@CarID AS VARCHAR(10)) + 
+            PRINT 'Image successfully loaded for MotID ' + CAST(@MotID AS VARCHAR(10)) + 
                   ' from ' + @FilePath + ' (' + CAST(DATALENGTH(@ImageData) AS VARCHAR(20)) + ' bytes)';
         ELSE
-            RAISERROR('CarID %d not found', 16, 1, @CarID);
+            RAISERROR('MotID %d not found', 16, 1, @MotID);
             
     END TRY
     BEGIN CATCH
@@ -120,30 +131,71 @@ BEGIN
 END
 GO
 
-EXEC dbo.LoadImageFromFile @CarID = 1, @FilePath = '/workspaces/Project25/Images/Car1.jpg';
-EXEC dbo.LoadImageFromFile @CarID = 2, @FilePath = '/workspaces/Project25/Images/Car2.jpg';
-EXEC dbo.LoadImageFromFile @CarID = 3, @FilePath = '/workspaces/Project25/Images/Car3.jpg';
-EXEC dbo.LoadImageFromFile @CarID = 4, @FilePath = '/workspaces/Project25/Images/Car4.jpg';
+EXEC dbo.LoadImageFromFile @MotID = 1, @FilePath = '/workspaces/Project25/Images/Car1.jpg';
+EXEC dbo.LoadImageFromFile @MotID = 2, @FilePath = '/workspaces/Project25/Images/Car2.jpg';
+EXEC dbo.LoadImageFromFile @MotID = 3, @FilePath = '/workspaces/Project25/Images/Car3.jpg';
+EXEC dbo.LoadImageFromFile @MotID = 4, @FilePath = '/workspaces/Project25/Images/Car4.jpg';
 
 GO
 
 -- Verify images were loaded
-SELECT CarID, LicensePlate, ImageURL, 
+SELECT MotID, VIN, Descr, ImageURL, 
        CASE WHEN ImageBlob IS NULL THEN 'No Image' 
             ELSE 'Image Loaded (' + CAST(DATALENGTH(ImageBlob) AS VARCHAR(20)) + ' bytes)' 
-       END AS ImageStatus
-FROM dbo.Car
-ORDER BY CarID;
+       END AS ImageStatus,
+       CASE WHEN ImageEmbedding IS NULL THEN 'No Embedding' 
+            ELSE 'Image Embedding (' + CAST(DATALENGTH(ImageEmbedding) AS VARCHAR(20)) + ' bytes)' 
+       END AS EmbeddingStatus
+FROM dbo.MeansOfTransportation
+ORDER BY MotID;
 GO
 
 -- Display actual images (will render in Azure Data Studio / SSMS)
 SELECT 
-    CarID,
-    LicensePlate,
+    MotID,
+    VIN,
+    Descr,
     ImageURL,
     ImageBlob AS Image,
     DATALENGTH(ImageBlob) AS ImageSizeBytes
-FROM dbo.Car
+FROM dbo.MeansOfTransportation
 WHERE ImageBlob IS NOT NULL
-ORDER BY CarID;
+ORDER BY MotID;
+GO
+
+
+
+-- Stored procedure to generate embedding summary
+CREATE OR ALTER PROCEDURE dbo.GetEmbeddingSummary
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    SELECT 
+        MotID,
+        VIN,
+        Descr,
+        CASE 
+            WHEN ImageEmbedding IS NULL THEN 'No Embedding'
+            ELSE 'Image Embedding (' + CAST(DATALENGTH(ImageEmbedding) AS VARCHAR(20)) + ' bytes)'
+        END AS ImageEmbeddingStatus,
+        p.FirstName + ' ' + p.LastName AS Owner
+    FROM dbo.MeansOfTransportation m
+    LEFT JOIN dbo.Person p ON m.PersonID = p.PersonID
+    ORDER BY MotID;
+END
+GO
+
+-- Display embedding summary
+PRINT '';
+PRINT '============================================================================';
+PRINT 'IMAGE EMBEDDING SUMMARY';
+PRINT '============================================================================';
+EXEC dbo.GetEmbeddingSummary;
+GO
+
+PRINT '';
+PRINT '============================================================================';
+PRINT 'Database setup complete!';
+PRINT '============================================================================';
 GO

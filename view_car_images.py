@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script to extract car images from SQL Server database and display them in VS Code.
+Script to extract vehicle images from SQL Server database and display them in VS Code.
 
 Requirements:
     pip install pyodbc pillow
@@ -52,10 +52,10 @@ def extract_images():
     
     # Query to get all cars with images
     cursor.execute("""
-        SELECT CarID, LicensePlate, ImageURL, ImageBlob, DATALENGTH(ImageBlob) AS ImageSize
-        FROM dbo.Car
+        SELECT MotID, VIN, ImageURL, ImageBlob, DATALENGTH(ImageBlob) AS ImageSize
+        FROM dbo.MeansOfTransportation
         WHERE ImageBlob IS NOT NULL
-        ORDER BY CarID
+        ORDER BY MotID
     """)
     
     rows = cursor.fetchall()
@@ -67,13 +67,13 @@ def extract_images():
         conn.close()
         return
     
-    print(f"\n✓ Found {len(rows)} car(s) with images\n")
+    print(f"\n✓ Found {len(rows)} vehicle(s) with images\n")
     
     saved_files = []
     
     for row in rows:
-        car_id = row.CarID
-        license_plate = row.LicensePlate
+        mot_id = row.MotID
+        vin = row.VIN
         image_url = row.ImageURL
         image_blob = row.ImageBlob
         image_size = row.ImageSize
@@ -85,7 +85,7 @@ def extract_images():
             ext = '.jpg'
         
         # Create filename
-        filename = f"Car{car_id}_{license_plate.replace('-', '_')}{ext}"
+        filename = f"Car{mot_id}_{vin.replace('-', '_')}{ext}"
         filepath = os.path.join(images_dir, filename)
         
         # Save image to file
@@ -94,10 +94,10 @@ def extract_images():
                 f.write(image_blob)
             
             saved_files.append(filepath)
-            print(f"  CarID {car_id} ({license_plate}): {filename} - {image_size:,} bytes")
+            print(f"  MotID {mot_id} ({vin}): {filename} - {image_size:,} bytes")
             
         except Exception as e:
-            print(f"  ✗ Error saving CarID {car_id}: {e}")
+            print(f"  ✗ Error saving MotID {mot_id}: {e}")
     
     cursor.close()
     conn.close()
@@ -122,6 +122,6 @@ def extract_images():
 
 if __name__ == '__main__':
     print("="*60)
-    print("Car Image Extractor - View images from SQL Server")
+    print("Vehicle Image Extractor - View images from SQL Server")
     print("="*60)
     extract_images()
